@@ -31,7 +31,9 @@ spring:
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:dev-only-secret-key-change-me-before-production-32bytes-min}
+      # Random 512-bit dev-only default (openssl rand -hex 64) -- override via JWT_SECRET env
+      # var for anything beyond a local machine. Never reuse this value in prod.
+      secret: ${JWT_SECRET:20118f357fe78c0b3c672f4837c3eae043200b46f69bd4e60d51bc2f7a9f9c90eb9451454df415599e565a99f15b1a1ee4848e19804bce8c31738d5d5ada547d}
 
 management:
   endpoints:
