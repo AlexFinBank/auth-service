@@ -14,6 +14,9 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
 
     Optional<SessionEntity> findByRefreshTokenHash(String refreshTokenHash);
 
+    Optional<SessionEntity> findByRefreshTokenHashOrPreviousRefreshTokenHash(String refreshTokenHash,
+                                                                              String previousRefreshTokenHash);
+
     Optional<SessionEntity> findByIdAndUserId(String id, String userId);
 
     List<SessionEntity> findByUserIdAndStatus(String userId, SessionStatusEnum status);

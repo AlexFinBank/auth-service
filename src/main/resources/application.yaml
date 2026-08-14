@@ -1,7 +1,49 @@
 spring:
   application:
     name: finbank-auth-service
+  profiles:
+    default: local
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: false
   kafka:
     producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # key/value serializers are wired via config/KafkaProducerConfig.java (needs a
+      # LocalDateTime-aware ObjectMapper), not by class name here.
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level [%thread] %logger{36} - %msg%n"
+
+app:
+  security:
+    jwt:
+      access-token-ttl-minutes: 15
+    refresh-token:
+      ttl-days: 7
+    session:
+      max-devices: 5
+    login:
+      max-failed-attempts: 5
+      lockout-minutes: 30
+    password-reset:
+      ttl-minutes: 15

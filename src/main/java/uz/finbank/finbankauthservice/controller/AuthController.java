@@ -1,5 +1,6 @@
 package uz.finbank.finbankauthservice.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -8,7 +9,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import uz.finbank.finbankauthservice.dto.request.LoginRequest;
+import uz.finbank.finbankauthservice.dto.request.RefreshRequest;
 import uz.finbank.finbankauthservice.dto.request.RegisterRequest;
+import uz.finbank.finbankauthservice.dto.response.LoginResponse;
 import uz.finbank.finbankauthservice.dto.response.UserResponse;
 import uz.finbank.finbankauthservice.service.AuthService;
 
@@ -23,5 +27,19 @@ public class AuthController {
     public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
         UserResponse response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request,
+                                                HttpServletRequest httpRequest) {
+        LoginResponse response = authService.login(request, httpRequest.getRemoteAddr());
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<LoginResponse> refresh(@Valid @RequestBody RefreshRequest request,
+                                                  HttpServletRequest httpRequest) {
+        LoginResponse response = authService.refresh(request, httpRequest.getRemoteAddr());
+        return ResponseEntity.ok(response);
     }
 }

@@ -23,6 +23,9 @@ public class SessionEntity extends BaseEntity {
     @Column(name = "refresh_token_hash", nullable = false, unique = true)
     private String refreshTokenHash;
 
+    @Column(name = "previous_refresh_token_hash")
+    private String previousRefreshTokenHash;
+
     @Column(name = "device_label")
     private String deviceLabel;
 

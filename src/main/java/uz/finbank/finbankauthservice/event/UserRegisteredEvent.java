@@ -1,24 +1,17 @@
 package uz.finbank.finbankauthservice.event;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import uz.finbank.finbankauthservice.entity.enums.RoleEnum;
 
 import java.time.LocalDateTime;
 
-@Data
 @Builder
-@AllArgsConstructor
-@NoArgsConstructor
-public class UserRegisteredEvent {
-
+public record UserRegisteredEvent(
+        String userId,
+        String username,
+        String email,
+        RoleEnum role,
+        LocalDateTime registeredAt
+) {
     public static final String TOPIC = "user-registered";
-
-    private String userId;
-    private String username;
-    private String email;
-    private RoleEnum role;
-    private LocalDateTime registeredAt;
 }

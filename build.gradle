@@ -74,6 +74,10 @@ dependencies {
 
     implementation 'org.springframework.boot:spring-boot-starter-kafka'
 
+    // Kafka's JsonSerializer uses classic Jackson 2.x internally, and needs this module
+    // explicitly to serialize our LocalDateTime-bearing event records.
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
 
     // =========================================================
     // OBSERVABILITY
@@ -119,6 +123,10 @@ dependencies {
     // Testcontainers
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.1'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.1'
+    testImplementation 'org.testcontainers:testcontainers-kafka:2.0.1'
+    testImplementation 'com.redis:testcontainers-redis:2.2.4'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
 
     // Lombok for tests
     testCompileOnly 'org.projectlombok:lombok'
