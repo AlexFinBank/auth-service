@@ -25,6 +25,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final TokenBlacklistService tokenBlacklistService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull FilterChain filterChain)
@@ -33,7 +34,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (StringUtils.hasText(header) && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length());
-            jwtTokenProvider.parseClaims(token).ifPresent(this::authenticate);
+            jwtTokenProvider.parseClaims(token)
+                    .filter(claims -> !tokenBlacklistService.isBlacklisted(claims.getId()))
+                    .ifPresent(this::authenticate);
         }
 
         filterChain.doFilter(request, response);

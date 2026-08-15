@@ -7,6 +7,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import uz.finbank.finbankauthservice.dto.request.LoginRequest;
 import uz.finbank.finbankauthservice.dto.request.RefreshRequest;
@@ -77,11 +78,64 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
                 restTemplate.postForEntity("/refresh", refreshRequest, ErrorResponse.class);
         assertThat(replayResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        // The access token itself is still cryptographically valid (JWTs aren't server-side
-        // revoked), but the underlying session must be gone because reuse revokes everything.
+        // firstAccessToken's jti was orphaned by the refresh's rotation (the session's current
+        // jti moved on to refreshBody's access token), so it was never blacklisted -- it's
+        // still a technically-valid, if now-orphaned, JWT. It still authenticates fine; the
+        // underlying session is simply gone because reuse revoked everything.
         ResponseEntity<SessionResponse[]> sessionsAfterReuse = restTemplate.exchange(
                 "/sessions", HttpMethod.GET, new HttpEntity<>(firstAuthHeaders), SessionResponse[].class);
         assertThat(sessionsAfterReuse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(sessionsAfterReuse.getBody()).isEmpty();
+
+        // refreshBody's access token WAS the session's current one at the moment reuse was
+        // detected, so it must be Redis-blacklisted and rejected outright -- not just "orphaned".
+        HttpHeaders rotatedAuthHeaders = new HttpHeaders();
+        rotatedAuthHeaders.setBearerAuth(refreshBody.accessToken());
+        ResponseEntity<ErrorResponse> rotatedTokenAfterReuse = restTemplate.exchange(
+                "/sessions", HttpMethod.GET, new HttpEntity<>(rotatedAuthHeaders), ErrorResponse.class);
+        assertThat(rotatedTokenAfterReuse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void should_rejectAccessTokenImmediately_whenItsSessionIsLoggedOut() {
+        String suffix = UUID.randomUUID().toString();
+        String email = "logout" + suffix + "@test.local";
+        String password = "longenoughpassword";
+
+        RegisterRequest registerRequest = RegisterRequest.builder()
+                .username("logout" + suffix)
+                .email(email)
+                .password(password)
+                .build();
+        assertThat(restTemplate.postForEntity("/register", registerRequest, UserResponse.class).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        LoginRequest loginRequest = LoginRequest.builder().email(email).password(password).build();
+        ResponseEntity<LoginResponse> loginResponse =
+                restTemplate.postForEntity("/login", loginRequest, LoginResponse.class);
+        LoginResponse loginBody = loginResponse.getBody();
+        assertThat(loginBody).isNotNull();
+
+        HttpHeaders authHeaders = new HttpHeaders();
+        authHeaders.setBearerAuth(loginBody.accessToken());
+
+        // The access token works before logout.
+        ResponseEntity<SessionResponse[]> beforeLogout = restTemplate.exchange(
+                "/sessions", HttpMethod.GET, new HttpEntity<>(authHeaders), SessionResponse[].class);
+        assertThat(beforeLogout.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        HttpHeaders logoutHeaders = new HttpHeaders();
+        logoutHeaders.setBearerAuth(loginBody.accessToken());
+        logoutHeaders.setContentType(MediaType.APPLICATION_JSON);
+        RefreshRequest logoutRequest = RefreshRequest.builder().refreshToken(loginBody.refreshToken()).build();
+        ResponseEntity<Void> logoutResponse = restTemplate.exchange(
+                "/logout", HttpMethod.POST, new HttpEntity<>(logoutRequest, logoutHeaders), Void.class);
+        assertThat(logoutResponse.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        // Same still-unexpired access token must now be rejected immediately (Redis blacklist),
+        // not accepted for another ~15 minutes as a stateless JWT would otherwise allow.
+        ResponseEntity<ErrorResponse> afterLogout = restTemplate.exchange(
+                "/sessions", HttpMethod.GET, new HttpEntity<>(authHeaders), ErrorResponse.class);
+        assertThat(afterLogout.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 }

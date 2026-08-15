@@ -14,6 +14,7 @@ public class AppSecurityProperties {
     private Session session = new Session();
     private Login login = new Login();
     private PasswordReset passwordReset = new PasswordReset();
+    private BootstrapAdmin bootstrapAdmin = new BootstrapAdmin();
 
     @Data
     public static class Jwt {
@@ -40,5 +41,16 @@ public class AppSecurityProperties {
     @Data
     public static class PasswordReset {
         private long ttlMinutes = 15;
+    }
+
+    /**
+     * Optional first-ADMIN seed, only acted on when all three fields are set (via env vars in
+     * practice) AND no ADMIN exists yet -- see BootstrapAdminRunner.
+     */
+    @Data
+    public static class BootstrapAdmin {
+        private String username;
+        private String email;
+        private String password;
     }
 }

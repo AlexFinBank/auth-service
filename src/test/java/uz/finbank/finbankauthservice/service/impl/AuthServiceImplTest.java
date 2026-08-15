@@ -36,6 +36,7 @@ import uz.finbank.finbankauthservice.repository.UserRepository;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
+import uz.finbank.finbankauthservice.service.SessionService;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -71,6 +72,8 @@ class AuthServiceImplTest {
     private SecureTokenGenerator secureTokenGenerator;
     @Mock
     private TokenHasher tokenHasher;
+    @Mock
+    private SessionService sessionService;
 
     private AppSecurityProperties securityProperties;
     private AuthServiceImpl authService;
@@ -93,7 +96,8 @@ class AuthServiceImplTest {
                 securityProperties,
                 jwtTokenProvider,
                 secureTokenGenerator,
-                tokenHasher
+                tokenHasher,
+                sessionService
         );
     }
 
@@ -505,7 +509,7 @@ class AuthServiceImplTest {
         assertThat(session.getPreviousRefreshTokenHash()).isEqualTo("hash-of-current-token");
         assertThat(session.getRefreshTokenHash()).isEqualTo("hash-of-new-token");
         verify(sessionRepository).save(session);
-        verify(sessionRepository, never()).revokeAllActiveByUserId(any());
+        verify(sessionService, never()).revokeAllActiveSessions(any());
     }
 
     @Test
@@ -528,7 +532,7 @@ class AuthServiceImplTest {
         assertThatThrownBy(() -> authService.refresh(request, "10.0.0.1"))
                 .isInstanceOf(InvalidRefreshTokenException.class);
 
-        verify(sessionRepository).revokeAllActiveByUserId("user-1");
+        verify(sessionService).revokeAllActiveSessions("user-1");
         verify(kafkaTemplate).send(eq(SuspiciousTokenReuseEvent.TOPIC), eq("user-1"), any(SuspiciousTokenReuseEvent.class));
 
         assertThat(session.getRefreshTokenHash()).isEqualTo("hash-of-newer-token");
@@ -547,7 +551,7 @@ class AuthServiceImplTest {
         assertThatThrownBy(() -> authService.refresh(request, "10.0.0.1"))
                 .isInstanceOf(InvalidRefreshTokenException.class);
 
-        verify(sessionRepository, never()).revokeAllActiveByUserId(any());
+        verify(sessionService, never()).revokeAllActiveSessions(any());
     }
 
     @Test

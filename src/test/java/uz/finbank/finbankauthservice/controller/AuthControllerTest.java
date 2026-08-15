@@ -17,6 +17,7 @@ import uz.finbank.finbankauthservice.dto.response.UserResponse;
 import uz.finbank.finbankauthservice.entity.enums.RoleEnum;
 import uz.finbank.finbankauthservice.entity.enums.UserStatusEnum;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.service.AuthService;
 
 import java.time.LocalDateTime;
@@ -47,6 +48,9 @@ class AuthControllerTest {
     // even with addFilters=false; it needs a JwtTokenProvider collaborator to satisfy that.
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @MockitoBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @Test
     void should_return201WithUserBody_when_registerRequestIsValid() throws Exception {

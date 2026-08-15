@@ -12,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import uz.finbank.finbankauthservice.dto.request.PasswordResetConfirmRequest;
 import uz.finbank.finbankauthservice.dto.request.PasswordResetRequest;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.service.PasswordResetService;
 
 import static org.mockito.Mockito.verify;
@@ -34,6 +35,9 @@ class PasswordResetControllerTest {
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @MockitoBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @Test
     void should_return202AndDelegateWithEmail_when_requestBodyIsValid() throws Exception {

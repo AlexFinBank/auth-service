@@ -47,3 +47,15 @@ app:
       lockout-minutes: 30
     password-reset:
       ttl-minutes: 15
+    # Optional first-ADMIN seed (BootstrapAdminRunner) -- no-op unless all three are set AND
+    # no ADMIN exists yet. Leave unset once you have a real ADMIN.
+    bootstrap-admin:
+      username: ${BOOTSTRAP_ADMIN_USERNAME:}
+      email: ${BOOTSTRAP_ADMIN_EMAIL:}
+      password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+
+  # StaleRecordCleanupJob: daily at 03:00 by default, deletes REVOKED/EXPIRED sessions and
+  # USED/EXPIRED password-reset tokens older than retention-days.
+  cleanup:
+    cron: "0 0 3 * * *"
+    retention-days: 30

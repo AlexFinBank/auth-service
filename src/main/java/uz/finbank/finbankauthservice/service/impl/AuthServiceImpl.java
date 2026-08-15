@@ -35,6 +35,7 @@ import uz.finbank.finbankauthservice.security.JwtTokenProvider;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 import uz.finbank.finbankauthservice.service.AuthService;
+import uz.finbank.finbankauthservice.service.SessionService;
 
 import java.time.LocalDateTime;
 
@@ -53,6 +54,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final SecureTokenGenerator secureTokenGenerator;
     private final TokenHasher tokenHasher;
+    private final SessionService sessionService;
 
     @Override
     @Transactional
@@ -117,9 +119,10 @@ public class AuthServiceImpl implements AuthService {
 
         evictOldestSessionIfLimitReached(user);
 
-        String rawRefreshToken = secureTokenGenerator.generate();
-        SessionEntity session = createSession(user, rawRefreshToken, request.deviceLabel(), ipAddress);
         String accessToken = jwtTokenProvider.generateAccessToken(user);
+        String jti = jwtTokenProvider.extractJti(accessToken);
+        String rawRefreshToken = secureTokenGenerator.generate();
+        SessionEntity session = createSession(user, rawRefreshToken, jti, request.deviceLabel(), ipAddress);
 
         publishLoginSucceededEvent(user, session, ipAddress);
 
@@ -153,10 +156,10 @@ public class AuthServiceImpl implements AuthService {
             throw new InvalidRefreshTokenException("Refresh token noto'g'ri");
         }
 
-        String newRawRefreshToken = secureTokenGenerator.generate();
-        rotateSession(session, newRawRefreshToken);
-
         String accessToken = jwtTokenProvider.generateAccessToken(session.getUser());
+        String jti = jwtTokenProvider.extractJti(accessToken);
+        String newRawRefreshToken = secureTokenGenerator.generate();
+        rotateSession(session, newRawRefreshToken, jti);
 
         return LoginResponse.builder()
                 .accessToken(accessToken)
@@ -166,17 +169,18 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
-    private void rotateSession(SessionEntity session, String newRawRefreshToken) {
+    private void rotateSession(SessionEntity session, String newRawRefreshToken, String accessTokenJti) {
         LocalDateTime now = LocalDateTime.now();
         session.setPreviousRefreshTokenHash(session.getRefreshTokenHash());
         session.setRefreshTokenHash(tokenHasher.hash(newRawRefreshToken));
+        session.setAccessTokenJti(accessTokenJti);
         session.setLastUsedAt(now);
         session.setExpiresAt(now.plusDays(securityProperties.getRefreshToken().getTtlDays()));
         sessionRepository.save(session);
     }
 
     private void handleSuspiciousReuse(SessionEntity session, String ipAddress) {
-        sessionRepository.revokeAllActiveByUserId(session.getUser().getId());
+        sessionService.revokeAllActiveSessions(session.getUser().getId());
         publishSuspiciousTokenReuseEvent(session, ipAddress);
     }
 
@@ -226,12 +230,14 @@ public class AuthServiceImpl implements AuthService {
                 });
     }
 
-    private SessionEntity createSession(UserEntity user, String rawRefreshToken, String deviceLabel, String ipAddress) {
+    private SessionEntity createSession(UserEntity user, String rawRefreshToken, String accessTokenJti,
+                                         String deviceLabel, String ipAddress) {
         LocalDateTime now = LocalDateTime.now();
 
         SessionEntity session = SessionEntity.builder()
                 .user(user)
                 .refreshTokenHash(tokenHasher.hash(rawRefreshToken))
+                .accessTokenJti(accessTokenJti)
                 .deviceLabel(StringUtils.hasText(deviceLabel) ? deviceLabel : UNKNOWN_DEVICE)
                 .ipAddress(ipAddress)
                 .status(SessionStatusEnum.ACTIVE)

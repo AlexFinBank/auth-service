@@ -15,6 +15,7 @@ import uz.finbank.finbankauthservice.entity.enums.RoleEnum;
 import uz.finbank.finbankauthservice.entity.enums.UserStatusEnum;
 import uz.finbank.finbankauthservice.exception.DuplicateResourceException;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.service.AuthService;
 
 import java.time.LocalDateTime;
@@ -45,6 +46,9 @@ class StaffControllerTest {
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @MockitoBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @Test
     void should_return201WithUserBody_when_createStaffRequestIsValid() throws Exception {

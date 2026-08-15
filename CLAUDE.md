@@ -65,9 +65,26 @@ Java 21, Spring Boot 4.1.0, Gradle (Groovy DSL), PostgreSQL, Redis, Kafka.
 
 ## Hozirgi holat
 
-Skeleton tayyor (entity, repository, controller, DTO, security config, Flyway
-migration). Biznes logika hali yozilmagan — `AuthServiceImpl` metodlari TODO.
+Barcha API endpoint'lar, biznes qoidalar va Kafka event'lar to'liq
+implementatsiya qilingan (`register`, `login`, `refresh` + reuse detection,
+`sessions` GET/DELETE, `logout`/`logout-all`, `password-reset` request/confirm,
+`internal/staff`). Qo'shimcha:
 
-**Navbatdagi qadam:** `register()` — happy path + duplicate email tekshiruvi.
+- **Redis** — revoke qilingan session'ning access token'i (`jti` claim orqali)
+  darhol blacklist qilinadi (`TokenBlacklistService`) — JWT o'z muddati
+  tugashini kutmasdan, logout/reuse-detection/parol-reset zahoti ishlamay qoladi.
+- **Bootstrap ADMIN** — `BootstrapAdminRunner`, `app.security.bootstrap-admin.*`
+  (env var) to'liq berilsa va hech qanday ADMIN mavjud bo'lmasa, ishga
+  tushganda avtomatik yaratadi.
+- **Tozalash job'i** — `StaleRecordCleanupJob` (kunlik, `app.cleanup.cron`),
+  muddati o'tgan ACTIVE session/reset-token'larni EXPIRED qiladi va eski
+  REVOKED/EXPIRED/USED yozuvlarni `retention-days`dan keyin o'chiradi.
+- **Profillar**: `local` (host + docker-compose infra), `docker` (hammasi
+  container'da), `prod` (hech qanday default yo'q, hammasi env var).
 
-To'liq spec: `docs/auth-service-tech-spec.md`
+Testlar: unit + `@WebMvcTest` + `@DataJpaTest` + Testcontainers'li to'liq
+integration testlar (109+ test, real Postgres/Kafka/Redis bilan). CI: GitHub
+Actions (`.github/workflows/ci.yml`) + Qodana code quality.
+
+Ishga tushirish, profil tanlash, `Dockerfile`/`docker-compose.yml` va kerakli
+env var'lar uchun: `README.md`.

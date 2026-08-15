@@ -1,0 +1,53 @@
+## For running the app itself as a container inside docker-compose (service name hosts, not
+## localhost). For running the app on the host machine against the same compose infra, use
+## the "local" profile instead (see application-local.yaml).
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+  datasource:
+    url: jdbc:postgresql://postgres:5432/finbank_auth
+    username: ${DB_USERNAME:finbank}
+    password: ${DB_PASSWORD:finbank}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+  kafka:
+    # Port 9093 is Kafka's INTERNAL (docker-network) listener -- see docker-compose.yml. 9092
+    # is only advertised as "localhost", which doesn't resolve to this container from inside
+    # the compose network.
+    bootstrap-servers: kafka:9093
+
+app:
+  security:
+    jwt:
+      # Same dev-only default as application-local.yaml -- fine for a local compose stack,
+      # never for anything reachable outside your machine.
+      secret: ${JWT_SECRET:20118f357fe78c0b3c672f4837c3eae043200b46f69bd4e60d51bc2f7a9f9c90eb9451454df415599e565a99f15b1a1ee4848e19804bce8c31738d5d5ada547d}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    uz.finbank.finbankauthservice: DEBUG

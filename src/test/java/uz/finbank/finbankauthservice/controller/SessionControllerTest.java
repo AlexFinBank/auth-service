@@ -13,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 import uz.finbank.finbankauthservice.dto.request.RefreshRequest;
 import uz.finbank.finbankauthservice.dto.response.SessionResponse;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.service.SessionService;
 
 import java.time.LocalDateTime;
@@ -46,6 +47,9 @@ class SessionControllerTest {
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @MockitoBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @Test
     void should_return200WithSessionList_when_getSessionsCalledByAuthenticatedUser() throws Exception {

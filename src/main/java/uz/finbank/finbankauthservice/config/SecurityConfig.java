@@ -44,6 +44,10 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                // We have our own stateless, JWT-based /logout in SessionController -- without
+                // this, Spring Security's default LogoutFilter silently claims that same path
+                // first and never lets the request reach our controller.
+                .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint(jwtAuthenticationEntryPoint)

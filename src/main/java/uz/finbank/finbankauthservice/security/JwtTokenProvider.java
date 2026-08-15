@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.Optional;
+import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -35,6 +36,7 @@ public class JwtTokenProvider {
         Instant expiresAt = now.plus(properties.getJwt().getAccessTokenTtlMinutes(), ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(user.getId())
                 .claim("email", user.getEmail())
                 .claim("role", user.getRole().name())
@@ -42,6 +44,10 @@ public class JwtTokenProvider {
                 .expiration(Date.from(expiresAt))
                 .signWith(signingKey)
                 .compact();
+    }
+
+    public String extractJti(String accessToken) {
+        return parseClaims(accessToken).map(Claims::getId).orElse(null);
     }
 
     public Optional<Claims> parseClaims(String token) {

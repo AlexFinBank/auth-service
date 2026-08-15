@@ -16,10 +16,10 @@ import uz.finbank.finbankauthservice.event.PasswordChangedEvent;
 import uz.finbank.finbankauthservice.event.PasswordResetRequestedEvent;
 import uz.finbank.finbankauthservice.exception.InvalidResetTokenException;
 import uz.finbank.finbankauthservice.repository.PasswordResetTokenRepository;
-import uz.finbank.finbankauthservice.repository.SessionRepository;
 import uz.finbank.finbankauthservice.repository.UserRepository;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
+import uz.finbank.finbankauthservice.service.SessionService;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -41,7 +41,7 @@ class PasswordResetServiceImplTest {
     @Mock
     private PasswordResetTokenRepository passwordResetTokenRepository;
     @Mock
-    private SessionRepository sessionRepository;
+    private SessionService sessionService;
     @Mock
     private PasswordEncoder passwordEncoder;
     @Mock
@@ -61,7 +61,7 @@ class PasswordResetServiceImplTest {
         service = new PasswordResetServiceImpl(
                 userRepository,
                 passwordResetTokenRepository,
-                sessionRepository,
+                sessionService,
                 passwordEncoder,
                 secureTokenGenerator,
                 tokenHasher,
@@ -133,7 +133,7 @@ class PasswordResetServiceImplTest {
         assertThat(resetToken.getStatus()).isEqualTo(PasswordResetTokenStatusEnum.USED);
         verify(passwordResetTokenRepository).save(resetToken);
 
-        verify(sessionRepository).revokeAllActiveByUserId("user-1");
+        verify(sessionService).revokeAllActiveSessions("user-1");
 
         ArgumentCaptor<PasswordChangedEvent> eventCaptor = ArgumentCaptor.forClass(PasswordChangedEvent.class);
         verify(kafkaTemplate).send(eq(PasswordChangedEvent.TOPIC), eq("user-1"), eventCaptor.capture());
@@ -149,7 +149,7 @@ class PasswordResetServiceImplTest {
                 .isInstanceOf(InvalidResetTokenException.class);
 
         verify(userRepository, never()).save(any());
-        verify(sessionRepository, never()).revokeAllActiveByUserId(any());
+        verify(sessionService, never()).revokeAllActiveSessions(any());
     }
 
     @Test

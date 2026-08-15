@@ -1,9 +1,11 @@
 package uz.finbank.finbankauthservice.service.impl;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import uz.finbank.finbankauthservice.config.AppSecurityProperties;
 import uz.finbank.finbankauthservice.dto.response.SessionResponse;
 import uz.finbank.finbankauthservice.entity.SessionEntity;
 import uz.finbank.finbankauthservice.entity.UserEntity;
@@ -11,8 +13,10 @@ import uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum;
 import uz.finbank.finbankauthservice.exception.ResourceNotFoundException;
 import uz.finbank.finbankauthservice.mapper.SessionMapper;
 import uz.finbank.finbankauthservice.repository.SessionRepository;
+import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,9 +37,19 @@ class SessionServiceImplTest {
     private SessionMapper sessionMapper;
     @Mock
     private TokenHasher tokenHasher;
+    @Mock
+    private TokenBlacklistService tokenBlacklistService;
+
+    private AppSecurityProperties securityProperties;
+
+    @BeforeEach
+    void setUp() {
+        securityProperties = new AppSecurityProperties();
+        securityProperties.getJwt().setAccessTokenTtlMinutes(15);
+    }
 
     private SessionServiceImpl newService() {
-        return new SessionServiceImpl(sessionRepository, sessionMapper, tokenHasher);
+        return new SessionServiceImpl(sessionRepository, sessionMapper, tokenHasher, tokenBlacklistService, securityProperties);
     }
 
     private UserEntity userWithId(String id) {
@@ -48,6 +62,7 @@ class SessionServiceImplTest {
         SessionEntity session = SessionEntity.builder()
                 .user(user)
                 .refreshTokenHash(refreshTokenHash)
+                .accessTokenJti("jti-" + id)
                 .status(SessionStatusEnum.ACTIVE)
                 .build();
         session.setId(id);
@@ -73,7 +88,7 @@ class SessionServiceImplTest {
     }
 
     @Test
-    void revokeSession_shouldRevokeAndSave_whenSessionBelongsToUser() {
+    void revokeSession_shouldRevokeSaveAndBlacklistJti_whenSessionBelongsToUser() {
         UserEntity user = userWithId("user-1");
         SessionEntity session = sessionFor("s1", user, "hash1");
         when(sessionRepository.findByIdAndUserId("s1", "user-1")).thenReturn(Optional.of(session));
@@ -82,6 +97,7 @@ class SessionServiceImplTest {
 
         assertThat(session.getStatus()).isEqualTo(SessionStatusEnum.REVOKED);
         verify(sessionRepository).save(session);
+        verify(tokenBlacklistService).blacklist("jti-s1", Duration.ofMinutes(15));
     }
 
     @Test
@@ -92,10 +108,11 @@ class SessionServiceImplTest {
                 .isInstanceOf(ResourceNotFoundException.class);
 
         verify(sessionRepository, never()).save(any());
+        verify(tokenBlacklistService, never()).blacklist(any(), any());
     }
 
     @Test
-    void logout_shouldRevokeAndSave_whenTokenBelongsToRequestingUser() {
+    void logout_shouldRevokeSaveAndBlacklistJti_whenTokenBelongsToRequestingUser() {
         UserEntity user = userWithId("user-1");
         SessionEntity session = sessionFor("s1", user, "hashed-token");
         when(tokenHasher.hash("raw-token")).thenReturn("hashed-token");
@@ -105,6 +122,7 @@ class SessionServiceImplTest {
 
         assertThat(session.getStatus()).isEqualTo(SessionStatusEnum.REVOKED);
         verify(sessionRepository).save(session);
+        verify(tokenBlacklistService).blacklist("jti-s1", Duration.ofMinutes(15));
     }
 
     @Test
@@ -118,6 +136,7 @@ class SessionServiceImplTest {
                 .isInstanceOf(ResourceNotFoundException.class);
 
         verify(sessionRepository, never()).save(any());
+        verify(tokenBlacklistService, never()).blacklist(any(), any());
     }
 
     @Test
@@ -132,9 +151,32 @@ class SessionServiceImplTest {
     }
 
     @Test
-    void logoutAll_shouldDelegateToRevokeAllActiveByUserId() {
+    void logoutAll_shouldDelegateToRevokeAllActiveSessions() {
+        UserEntity user = userWithId("user-1");
+        SessionEntity s1 = sessionFor("s1", user, "hash1");
+        SessionEntity s2 = sessionFor("s2", user, "hash2");
+        when(sessionRepository.findByUserIdAndStatus("user-1", SessionStatusEnum.ACTIVE))
+                .thenReturn(List.of(s1, s2));
+
         newService().logoutAll("user-1");
 
         verify(sessionRepository).revokeAllActiveByUserId(eq("user-1"));
+        verify(tokenBlacklistService).blacklist("jti-s1", Duration.ofMinutes(15));
+        verify(tokenBlacklistService).blacklist("jti-s2", Duration.ofMinutes(15));
+    }
+
+    @Test
+    void revokeAllActiveSessions_shouldBulkRevokeThenBlacklistEachPreviouslyActiveSessionsJti() {
+        UserEntity user = userWithId("user-1");
+        SessionEntity s1 = sessionFor("s1", user, "hash1");
+        SessionEntity s2 = sessionFor("s2", user, "hash2");
+        when(sessionRepository.findByUserIdAndStatus("user-1", SessionStatusEnum.ACTIVE))
+                .thenReturn(List.of(s1, s2));
+
+        newService().revokeAllActiveSessions("user-1");
+
+        verify(sessionRepository).revokeAllActiveByUserId("user-1");
+        verify(tokenBlacklistService).blacklist("jti-s1", Duration.ofMinutes(15));
+        verify(tokenBlacklistService).blacklist("jti-s2", Duration.ofMinutes(15));
     }
 }

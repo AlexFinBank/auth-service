@@ -7,6 +7,8 @@ import org.springframework.data.repository.query.Param;
 import uz.finbank.finbankauthservice.entity.SessionEntity;
 import uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,4 +31,14 @@ public interface SessionRepository extends JpaRepository<SessionEntity, String> 
     @Query("UPDATE SessionEntity s SET s.status = uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum.REVOKED " +
             "WHERE s.user.id = :userId AND s.status = uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum.ACTIVE")
     int revokeAllActiveByUserId(@Param("userId") String userId);
+
+    @Modifying
+    @Query("UPDATE SessionEntity s SET s.status = uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum.EXPIRED " +
+            "WHERE s.status = uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum.ACTIVE AND s.expiresAt < :now")
+    int expireStaleActiveSessions(@Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query("DELETE FROM SessionEntity s WHERE s.status IN :statuses AND s.updatedAt < :cutoff")
+    int deleteByStatusInAndUpdatedAtBefore(@Param("statuses") Collection<SessionStatusEnum> statuses,
+                                            @Param("cutoff") LocalDateTime cutoff);
 }

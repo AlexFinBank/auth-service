@@ -13,11 +13,11 @@ import uz.finbank.finbankauthservice.event.PasswordChangedEvent;
 import uz.finbank.finbankauthservice.event.PasswordResetRequestedEvent;
 import uz.finbank.finbankauthservice.exception.InvalidResetTokenException;
 import uz.finbank.finbankauthservice.repository.PasswordResetTokenRepository;
-import uz.finbank.finbankauthservice.repository.SessionRepository;
 import uz.finbank.finbankauthservice.repository.UserRepository;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 import uz.finbank.finbankauthservice.service.PasswordResetService;
+import uz.finbank.finbankauthservice.service.SessionService;
 
 import java.time.LocalDateTime;
 
@@ -27,7 +27,7 @@ public class PasswordResetServiceImpl implements PasswordResetService {
 
     private final UserRepository userRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
-    private final SessionRepository sessionRepository;
+    private final SessionService sessionService;
     private final PasswordEncoder passwordEncoder;
     private final SecureTokenGenerator secureTokenGenerator;
     private final TokenHasher tokenHasher;
@@ -58,7 +58,7 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         resetToken.setStatus(PasswordResetTokenStatusEnum.USED);
         passwordResetTokenRepository.save(resetToken);
 
-        sessionRepository.revokeAllActiveByUserId(user.getId());
+        sessionService.revokeAllActiveSessions(user.getId());
 
         publishPasswordChangedEvent(user);
     }
