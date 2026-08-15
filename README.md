@@ -6,6 +6,9 @@ kimsan, token'ing haqiqiymi" savoliga javob beradi — avtorizatsiya qarorini
 boshqa servis'lar JWT ichidagi `role` claim asosida o'zi qabul qiladi.
 
 To'liq biznes qoidalar va arxitektura qarorlari uchun: [`CLAUDE.md`](./CLAUDE.md).
+Dastlabki texnik topshiriq va platforma-keng arxitektura qarorlari (ADR'lar) uchun:
+[`docs/auth-service-tech-spec.md`](./docs/auth-service-tech-spec.md) va
+[`docs/adr/`](./docs/adr/).
 
 ## Stack
 
