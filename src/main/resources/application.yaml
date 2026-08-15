@@ -9,6 +9,18 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+  datasource:
+    hikari:
+      connection-timeout: 3000
+  data:
+    redis:
+      timeout: 2000
+      jedis:
+        pool:
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+          max-wait: 2000
   flyway:
     locations: classpath:db/migration
     baseline-on-migrate: false
@@ -20,6 +32,10 @@ spring:
       retries: 3
       properties:
         spring.json.add.type.headers: false
+        # Default is 60000ms -- if no broker is reachable at all, send() blocks the calling
+        # HTTP request thread for that long before failing. Fail fast instead; EventPublisher
+        # swallows the failure either way so register/login/refresh keep working.
+        max.block.ms: 5000
 
 management:
   endpoints:
@@ -53,6 +69,13 @@ app:
       username: ${BOOTSTRAP_ADMIN_USERNAME:}
       email: ${BOOTSTRAP_ADMIN_EMAIL:}
       password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    rate-limit:
+      login-max-per-email: 10
+      login-max-per-ip: 30
+      login-window-minutes: 5
+      password-reset-max-per-email: 3
+      password-reset-max-per-ip: 10
+      password-reset-window-minutes: 15
 
   # StaleRecordCleanupJob: daily at 03:00 by default, deletes REVOKED/EXPIRED sessions and
   # USED/EXPIRED password-reset tokens older than retention-days.

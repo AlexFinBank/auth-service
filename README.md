@@ -105,8 +105,41 @@ ishlab turishi shart. Hech qanday qo'shimcha konfiguratsiya kerak emas.
 `GET /sessions`, `DELETE /sessions/{id}`, `/password-reset/request`,
 `/password-reset/confirm`, `POST /internal/staff` (faqat ADMIN).
 
+### `POST /register` va `Idempotency-Key`
+
+Client so'rovga ixtiyoriy `Idempotency-Key` header'ini qo'shishi mumkin (masalan,
+UUID). Shu key bilan qayta yuborilgan so'rov qayta ishlanmaydi — birinchi
+urinishning natijasi (muvaffaqiyat yoki duplicate-email xatosi) aynan
+qaytariladi. Bu tarmoq uzilishi sabab javob yo'qolgan holatda client'ning
+xavfsiz retry qilishi uchun. Key 24 soat davomida Redis'da saqlanadi. Header
+berilmasa, endpoint avvalgidek ishlaydi (idempotentlik kafolati yo'q).
+
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) har bir push/PR'da `./gradlew build`
 (kompilyatsiya + to'liq test suite) ishga tushiradi. Qodana code quality skani
 ham alohida workflow sifatida ishlaydi.
+
+## Xavfsizlik bo'yicha eslatmalar
+
+**`PasswordResetRequestedEvent` ichida xom (raw) reset-token bor.** Bu event
+`PasswordResetServiceImpl`da parol tiklash so'ralganda Kafka'ga xabar
+yuboriladi — email yuborish service'i shu event'ni o'qib, foydalanuvchiga
+havola jo'natadi. Token DB'da faqat hash holida saqlanadi (`token_hash`), lekin
+Kafka topic'idagi event payload'ida xom holicha ketadi, chunki email yuboruvchi
+consumer'ga faqat hash emas, ishlaydigan link kerak.
+
+Bu — token'ni email orqali yuborishning tabiiy natijasi (email ham "plain
+text"da boradi), lekin Kafka topic'i email'dan farqli o'laroq ko'pincha
+ko'proq consumer/log tizimga ochiq bo'ladi. Shuning uchun:
+
+- `password-reset-requested` topic'iga **faqat** email-yuboruvchi consumer
+  group'i uchun ACL/ruxsat berilishi kerak (boshqa hech qanday consumer
+  o'qiy olmasligi kerak).
+- Broker darajasida topic uchun qisqa retention (masalan, bir necha soat)
+  o'rnatish tavsiya etiladi — token 15 daqiqada muddati tugaydi, uzoq
+  saqlashning hojati yo'q.
+- Kafka'da encryption-at-rest yoqilgan bo'lishi kerak (prod uchun majburiy).
+
+Kod darajasida o'zgartirish qilinmadi — bu operatsion/infratuzilma konfiguratsiyasi
+sifatida hal qilinishi kerak bo'lgan masala.

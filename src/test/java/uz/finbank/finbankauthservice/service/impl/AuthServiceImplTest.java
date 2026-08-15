@@ -6,7 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.kafka.core.KafkaTemplate;
+import uz.finbank.finbankauthservice.event.EventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import uz.finbank.finbankauthservice.config.AppSecurityProperties;
 import uz.finbank.finbankauthservice.dto.request.CreateStaffRequest;
@@ -30,10 +30,13 @@ import uz.finbank.finbankauthservice.exception.DuplicateResourceException;
 import uz.finbank.finbankauthservice.exception.InvalidCredentialsException;
 import uz.finbank.finbankauthservice.exception.InvalidRefreshTokenException;
 import uz.finbank.finbankauthservice.exception.InvalidRequestException;
+import uz.finbank.finbankauthservice.exception.TooManyRequestsException;
+import uz.finbank.finbankauthservice.idempotency.IdempotencyService;
 import uz.finbank.finbankauthservice.mapper.UserMapper;
 import uz.finbank.finbankauthservice.repository.SessionRepository;
 import uz.finbank.finbankauthservice.repository.UserRepository;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.RateLimiterService;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 import uz.finbank.finbankauthservice.service.SessionService;
@@ -44,9 +47,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -65,7 +70,7 @@ class AuthServiceImplTest {
     @Mock
     private UserMapper userMapper;
     @Mock
-    private KafkaTemplate<String, Object> kafkaTemplate;
+    private EventPublisher eventPublisher;
     @Mock
     private JwtTokenProvider jwtTokenProvider;
     @Mock
@@ -74,6 +79,10 @@ class AuthServiceImplTest {
     private TokenHasher tokenHasher;
     @Mock
     private SessionService sessionService;
+    @Mock
+    private RateLimiterService rateLimiterService;
+    @Mock
+    private IdempotencyService idempotencyService;
 
     private AppSecurityProperties securityProperties;
     private AuthServiceImpl authService;
@@ -92,12 +101,14 @@ class AuthServiceImplTest {
                 sessionRepository,
                 passwordEncoder,
                 userMapper,
-                kafkaTemplate,
+                eventPublisher,
                 securityProperties,
                 jwtTokenProvider,
                 secureTokenGenerator,
                 tokenHasher,
-                sessionService
+                sessionService,
+                rateLimiterService,
+                idempotencyService
         );
     }
 
@@ -140,7 +151,7 @@ class AuthServiceImplTest {
                 .role(RoleEnum.CUSTOMER).status(UserStatusEnum.ACTIVE).build();
         when(userMapper.toResponse(savedUser)).thenReturn(mappedResponse);
 
-        UserResponse result = authService.register(request);
+        UserResponse result = authService.register(request, null);
 
         assertThat(result).isEqualTo(mappedResponse);
 
@@ -153,7 +164,7 @@ class AuthServiceImplTest {
         assertThat(toSave.getRole()).isEqualTo(RoleEnum.CUSTOMER);
         assertThat(toSave.getStatus()).isEqualTo(UserStatusEnum.ACTIVE);
 
-        verify(kafkaTemplate).send(eq(UserRegisteredEvent.TOPIC), eq("user-1"), any(UserRegisteredEvent.class));
+        verify(eventPublisher).publish(eq(UserRegisteredEvent.TOPIC), eq("user-1"), any(UserRegisteredEvent.class));
     }
 
     @Test
@@ -163,7 +174,7 @@ class AuthServiceImplTest {
 
         when(userRepository.existsByEmail("john@example.com")).thenReturn(true);
 
-        assertThatThrownBy(() -> authService.register(request))
+        assertThatThrownBy(() -> authService.register(request, null))
                 .isInstanceOf(DuplicateResourceException.class);
 
         verify(userRepository, never()).save(any());
@@ -177,10 +188,45 @@ class AuthServiceImplTest {
         when(userRepository.existsByEmail("john@example.com")).thenReturn(false);
         when(userRepository.existsByUsername("john")).thenReturn(true);
 
-        assertThatThrownBy(() -> authService.register(request))
+        assertThatThrownBy(() -> authService.register(request, null))
                 .isInstanceOf(DuplicateResourceException.class);
 
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void should_delegateToIdempotencyService_when_idempotencyKeyIsProvided() {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("john").email("john@example.com").password("plain-password").build();
+        UserResponse mappedResponse = UserResponse.builder()
+                .id("user-1").username("john").email("john@example.com")
+                .role(RoleEnum.CUSTOMER).status(UserStatusEnum.ACTIVE).build();
+
+        when(idempotencyService.executeRegisterIdempotently(eq("key-1"), any()))
+                .thenReturn(mappedResponse);
+
+        UserResponse result = authService.register(request, "key-1");
+
+        assertThat(result).isEqualTo(mappedResponse);
+        verify(userRepository, never()).existsByEmail(any());
+    }
+
+    @Test
+    void should_notCallIdempotencyService_when_idempotencyKeyIsBlank() {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("john").email("john@example.com").password("plain-password").build();
+
+        when(userRepository.existsByEmail("john@example.com")).thenReturn(false);
+        when(userRepository.existsByUsername("john")).thenReturn(false);
+        when(passwordEncoder.encode("plain-password")).thenReturn("encoded-password");
+        UserEntity savedUser = buildUser("user-1", "john@example.com", "john", "encoded-password",
+                RoleEnum.CUSTOMER, UserStatusEnum.ACTIVE, 0, null);
+        when(userRepository.save(any(UserEntity.class))).thenReturn(savedUser);
+
+        authService.register(request, "   ");
+
+        verifyNoInteractions(idempotencyService);
     }
 
     // ---------- createStaff() ----------
@@ -208,7 +254,7 @@ class AuthServiceImplTest {
 
         assertThat(result).isEqualTo(mappedResponse);
         verify(userRepository).save(argThat(u -> u.getRole() == RoleEnum.ADMIN));
-        verify(kafkaTemplate).send(eq(UserRegisteredEvent.TOPIC), eq("user-2"), any(UserRegisteredEvent.class));
+        verify(eventPublisher).publish(eq(UserRegisteredEvent.TOPIC), eq("user-2"), any(UserRegisteredEvent.class));
     }
 
     @Test
@@ -285,7 +331,7 @@ class AuthServiceImplTest {
                 .isInstanceOf(DuplicateResourceException.class);
 
         verify(userRepository, never()).save(any());
-        verifyNoInteractions(kafkaTemplate);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -301,10 +347,22 @@ class AuthServiceImplTest {
                 .isInstanceOf(DuplicateResourceException.class);
 
         verify(userRepository, never()).save(any());
-        verifyNoInteractions(kafkaTemplate);
+        verifyNoInteractions(eventPublisher);
     }
 
     // ---------- login() ----------
+
+    @Test
+    void should_throwTooManyRequestsAndSkipUserLookup_when_rateLimiterDeniesTheEmailKey() {
+        LoginRequest request = LoginRequest.builder().email("john@example.com").password("plain-password").build();
+        doThrow(new TooManyRequestsException("juda ko'p urinish"))
+                .when(rateLimiterService).enforce(eq("login:email:john@example.com"), anyInt(), any());
+
+        assertThatThrownBy(() -> authService.login(request, "127.0.0.1"))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verifyNoInteractions(userRepository);
+    }
 
     @Test
     void should_loginSuccessfully_when_credentialsAreCorrectAndUnderSessionLimit() {
@@ -334,8 +392,36 @@ class AuthServiceImplTest {
         assertThat(response.expiresInSeconds()).isEqualTo(15 * 60);
 
         verify(userRepository).save(argThat(u -> u.getFailedLoginAttempts() == 0));
-        verify(kafkaTemplate).send(eq(LoginSucceededEvent.TOPIC), eq("user-1"), any(LoginSucceededEvent.class));
+        verify(eventPublisher).publish(eq(LoginSucceededEvent.TOPIC), eq("user-1"),
+                argThat((LoginSucceededEvent e) -> e.role() == RoleEnum.CUSTOMER));
         verify(sessionRepository, never()).findFirstByUserIdAndStatusOrderByLastUsedAtAsc(any(), any());
+    }
+
+    @Test
+    void should_publishLoginSucceededEventWithStaffRole_when_anAdminLogsIn() {
+        UserEntity admin = buildUser("admin-1", "admin@example.com", "admin", "encoded-password",
+                RoleEnum.ADMIN, UserStatusEnum.ACTIVE, 0, null);
+
+        LoginRequest request = LoginRequest.builder()
+                .email("admin@example.com").password("plain-password").build();
+
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(admin));
+        when(passwordEncoder.matches("plain-password", "encoded-password")).thenReturn(true);
+        when(sessionRepository.countByUserIdAndStatus("admin-1", SessionStatusEnum.ACTIVE)).thenReturn(0L);
+        when(secureTokenGenerator.generate()).thenReturn("raw-token-admin");
+        when(tokenHasher.hash("raw-token-admin")).thenReturn("hash-of-raw-token-admin");
+        when(jwtTokenProvider.generateAccessToken(admin)).thenReturn("access-token-admin");
+        when(sessionRepository.save(any(SessionEntity.class))).thenAnswer(inv -> {
+            SessionEntity s = inv.getArgument(0);
+            s.setId("session-admin");
+            return s;
+        });
+
+        authService.login(request, "127.0.0.1");
+
+        // This is the field a downstream fraud-service would key stronger monitoring off of.
+        verify(eventPublisher).publish(eq(LoginSucceededEvent.TOPIC), eq("admin-1"),
+                argThat((LoginSucceededEvent e) -> e.role() == RoleEnum.ADMIN));
     }
 
     @Test
@@ -365,7 +451,7 @@ class AuthServiceImplTest {
 
         verify(userRepository).save(argThat(u ->
                 u.getFailedLoginAttempts() == 3 && u.getStatus() == UserStatusEnum.ACTIVE));
-        verify(kafkaTemplate).send(eq(LoginFailedEvent.TOPIC), eq("john@example.com"), any(LoginFailedEvent.class));
+        verify(eventPublisher).publish(eq(LoginFailedEvent.TOPIC), eq("john@example.com"), any(LoginFailedEvent.class));
     }
 
     @Test
@@ -400,7 +486,8 @@ class AuthServiceImplTest {
         when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> authService.login(request, "10.0.0.1"))
-                .isInstanceOf(AccountLockedException.class);
+                .isInstanceOf(AccountLockedException.class)
+                .hasMessageContaining("10 daqiqadan so'ng");
 
         verify(passwordEncoder, never()).matches(any(), any());
     }
@@ -533,7 +620,7 @@ class AuthServiceImplTest {
                 .isInstanceOf(InvalidRefreshTokenException.class);
 
         verify(sessionService).revokeAllActiveSessions("user-1");
-        verify(kafkaTemplate).send(eq(SuspiciousTokenReuseEvent.TOPIC), eq("user-1"), any(SuspiciousTokenReuseEvent.class));
+        verify(eventPublisher).publish(eq(SuspiciousTokenReuseEvent.TOPIC), eq("user-1"), any(SuspiciousTokenReuseEvent.class));
 
         assertThat(session.getRefreshTokenHash()).isEqualTo("hash-of-newer-token");
         verify(sessionRepository, never()).save(any());

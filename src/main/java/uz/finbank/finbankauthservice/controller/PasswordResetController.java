@@ -1,5 +1,6 @@
 package uz.finbank.finbankauthservice.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,8 +21,8 @@ public class PasswordResetController {
     private final PasswordResetService passwordResetService;
 
     @PostMapping("/request")
-    public ResponseEntity<Void> request(@Valid @RequestBody PasswordResetRequest request) {
-        passwordResetService.requestReset(request.email());
+    public ResponseEntity<Void> request(@Valid @RequestBody PasswordResetRequest request, HttpServletRequest httpRequest) {
+        passwordResetService.requestReset(request.email(), httpRequest.getRemoteAddr());
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
     }
 

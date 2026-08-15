@@ -8,12 +8,13 @@ import uz.finbank.finbankauthservice.entity.enums.UserStatusEnum;
 
 import java.time.LocalDateTime;
 
-@EqualsAndHashCode(callSuper = true)
 @Entity
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@Data
+@Getter
+@Setter
+@ToString(exclude = "password")
 @Table(name = "users")
 public class UserEntity extends BaseEntity {
     @Column(name = "username", nullable = false, unique = true)

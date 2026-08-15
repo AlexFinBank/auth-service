@@ -7,15 +7,18 @@ import uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum;
 
 import java.time.LocalDateTime;
 
-@EqualsAndHashCode(callSuper = true)
 @Entity
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@Data
+@Getter
+@Setter
+@ToString(exclude = {"user", "refreshTokenHash", "previousRefreshTokenHash"})
 @Table(name = "sessions")
 public class SessionEntity extends BaseEntity {
 
+    // Excluded from toString: lazy-loaded, so toString() outside a Hibernate session would
+    // throw LazyInitializationException; @Data's generated toString had this exact bug.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private UserEntity user;

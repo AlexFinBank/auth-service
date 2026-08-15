@@ -1,7 +1,6 @@
 package uz.finbank.finbankauthservice.service.impl;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,10 +17,12 @@ import uz.finbank.finbankauthservice.entity.UserEntity;
 import uz.finbank.finbankauthservice.entity.enums.RoleEnum;
 import uz.finbank.finbankauthservice.entity.enums.SessionStatusEnum;
 import uz.finbank.finbankauthservice.entity.enums.UserStatusEnum;
+import uz.finbank.finbankauthservice.event.EventPublisher;
 import uz.finbank.finbankauthservice.event.LoginFailedEvent;
 import uz.finbank.finbankauthservice.event.LoginSucceededEvent;
 import uz.finbank.finbankauthservice.event.SuspiciousTokenReuseEvent;
 import uz.finbank.finbankauthservice.event.UserRegisteredEvent;
+import uz.finbank.finbankauthservice.idempotency.IdempotencyService;
 import uz.finbank.finbankauthservice.exception.AccountDisabledException;
 import uz.finbank.finbankauthservice.exception.AccountLockedException;
 import uz.finbank.finbankauthservice.exception.DuplicateResourceException;
@@ -32,11 +33,13 @@ import uz.finbank.finbankauthservice.mapper.UserMapper;
 import uz.finbank.finbankauthservice.repository.SessionRepository;
 import uz.finbank.finbankauthservice.repository.UserRepository;
 import uz.finbank.finbankauthservice.security.JwtTokenProvider;
+import uz.finbank.finbankauthservice.security.RateLimiterService;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 import uz.finbank.finbankauthservice.service.AuthService;
 import uz.finbank.finbankauthservice.service.SessionService;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 @Service
@@ -49,16 +52,25 @@ public class AuthServiceImpl implements AuthService {
     private final SessionRepository sessionRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final EventPublisher eventPublisher;
     private final AppSecurityProperties securityProperties;
     private final JwtTokenProvider jwtTokenProvider;
     private final SecureTokenGenerator secureTokenGenerator;
     private final TokenHasher tokenHasher;
     private final SessionService sessionService;
+    private final RateLimiterService rateLimiterService;
+    private final IdempotencyService idempotencyService;
 
     @Override
     @Transactional
-    public UserResponse register(RegisterRequest request) {
+    public UserResponse register(RegisterRequest request, String idempotencyKey) {
+        if (StringUtils.hasText(idempotencyKey)) {
+            return idempotencyService.executeRegisterIdempotently(idempotencyKey, () -> doRegister(request));
+        }
+        return doRegister(request);
+    }
+
+    private UserResponse doRegister(RegisterRequest request) {
         UserEntity savedUser = createUser(request.username(), request.email(), request.password(), RoleEnum.CUSTOMER);
         publishUserRegisteredEvent(savedUser);
         return userMapper.toResponse(savedUser);
@@ -102,6 +114,8 @@ public class AuthServiceImpl implements AuthService {
     // write, and the 5-failed-attempts lockout would never actually persist.
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
     public LoginResponse login(LoginRequest request, String ipAddress) {
+        enforceLoginRateLimit(request.email(), ipAddress);
+
         UserEntity user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new InvalidCredentialsException("Email yoki parol noto'g'ri"));
 
@@ -116,6 +130,11 @@ public class AuthServiceImpl implements AuthService {
             user.setFailedLoginAttempts(0);
             userRepository.save(user);
         }
+
+        // Serializes concurrent logins for this exact user for the rest of the transaction, so
+        // the count-then-evict-then-insert sequence below can't race with another simultaneous
+        // login and let more than maxDevices sessions end up ACTIVE at once.
+        userRepository.lockById(user.getId());
 
         evictOldestSessionIfLimitReached(user);
 
@@ -184,6 +203,13 @@ public class AuthServiceImpl implements AuthService {
         publishSuspiciousTokenReuseEvent(session, ipAddress);
     }
 
+    private void enforceLoginRateLimit(String email, String ipAddress) {
+        AppSecurityProperties.RateLimit rateLimit = securityProperties.getRateLimit();
+        Duration window = Duration.ofMinutes(rateLimit.getLoginWindowMinutes());
+        rateLimiterService.enforce("login:email:" + email.toLowerCase(), rateLimit.getLoginMaxPerEmail(), window);
+        rateLimiterService.enforce("login:ip:" + ipAddress, rateLimit.getLoginMaxPerIp(), window);
+    }
+
     private void ensureAccountUsable(UserEntity user) {
         if (user.getStatus() == UserStatusEnum.DISABLED) {
             throw new AccountDisabledException("Hisob faolsizlantirilgan");
@@ -196,7 +222,10 @@ public class AuthServiceImpl implements AuthService {
                 userRepository.save(user);
                 return;
             }
-            throw new AccountLockedException("Hisob vaqtincha bloklangan, keyinroq urinib ko'ring");
+            long remainingSeconds = Duration.between(LocalDateTime.now(), lockedUntil).getSeconds();
+            long remainingMinutes = Math.max(1, (remainingSeconds + 59) / 60);
+            throw new AccountLockedException(
+                    "Hisob vaqtincha bloklangan, " + remainingMinutes + " daqiqadan so'ng qayta urinib ko'ring");
         }
     }
 
@@ -256,18 +285,19 @@ public class AuthServiceImpl implements AuthService {
                 .role(user.getRole())
                 .registeredAt(user.getCreatedAt())
                 .build();
-        kafkaTemplate.send(UserRegisteredEvent.TOPIC, user.getId(), event);
+        eventPublisher.publish(UserRegisteredEvent.TOPIC, user.getId(), event);
     }
 
     private void publishLoginSucceededEvent(UserEntity user, SessionEntity session, String ipAddress) {
         LoginSucceededEvent event = LoginSucceededEvent.builder()
                 .userId(user.getId())
                 .sessionId(session.getId())
+                .role(user.getRole())
                 .ipAddress(ipAddress)
                 .deviceLabel(session.getDeviceLabel())
                 .loggedInAt(session.getLastUsedAt())
                 .build();
-        kafkaTemplate.send(LoginSucceededEvent.TOPIC, user.getId(), event);
+        eventPublisher.publish(LoginSucceededEvent.TOPIC, user.getId(), event);
     }
 
     private void publishSuspiciousTokenReuseEvent(SessionEntity session, String ipAddress) {
@@ -277,7 +307,7 @@ public class AuthServiceImpl implements AuthService {
                 .ipAddress(ipAddress)
                 .detectedAt(LocalDateTime.now())
                 .build();
-        kafkaTemplate.send(SuspiciousTokenReuseEvent.TOPIC, session.getUser().getId(), event);
+        eventPublisher.publish(SuspiciousTokenReuseEvent.TOPIC, session.getUser().getId(), event);
     }
 
     private void publishLoginFailedEvent(String email, String ipAddress, String reason) {
@@ -287,6 +317,6 @@ public class AuthServiceImpl implements AuthService {
                 .reason(reason)
                 .attemptedAt(LocalDateTime.now())
                 .build();
-        kafkaTemplate.send(LoginFailedEvent.TOPIC, email, event);
+        eventPublisher.publish(LoginFailedEvent.TOPIC, email, event);
     }
 }

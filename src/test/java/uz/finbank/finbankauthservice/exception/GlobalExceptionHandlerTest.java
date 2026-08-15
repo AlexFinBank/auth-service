@@ -79,6 +79,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void handleTooManyRequests_shouldReturn429() {
+        ResponseEntity<ErrorResponse> response =
+                handler.handleTooManyRequests(new TooManyRequestsException("juda ko'p so'rov"));
+
+        assertStatusAndMessage(response, HttpStatus.TOO_MANY_REQUESTS, "juda ko'p so'rov");
+    }
+
+    @Test
     void handleValidation_shouldReturn400WithFieldErrors() throws NoSuchMethodException {
         MethodParameter methodParameter = new MethodParameter(
                 GlobalExceptionHandlerTest.class.getDeclaredMethod("dummyTarget", String.class), 0);

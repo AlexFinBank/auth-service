@@ -15,6 +15,8 @@ import uz.finbank.finbankauthservice.security.JwtTokenProvider;
 import uz.finbank.finbankauthservice.security.TokenBlacklistService;
 import uz.finbank.finbankauthservice.service.PasswordResetService;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,7 +50,7 @@ class PasswordResetControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isAccepted());
 
-        verify(passwordResetService).requestReset("john@example.com");
+        verify(passwordResetService).requestReset(eq("john@example.com"), anyString());
     }
 
     @Test

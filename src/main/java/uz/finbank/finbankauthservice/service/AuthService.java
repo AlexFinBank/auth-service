@@ -9,7 +9,7 @@ import uz.finbank.finbankauthservice.dto.response.UserResponse;
 
 public interface AuthService {
 
-    UserResponse register(RegisterRequest request);
+    UserResponse register(RegisterRequest request, String idempotencyKey);
 
     UserResponse createStaff(CreateStaffRequest request);
 

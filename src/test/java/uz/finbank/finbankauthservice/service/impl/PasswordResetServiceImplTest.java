@@ -6,7 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.kafka.core.KafkaTemplate;
+import uz.finbank.finbankauthservice.event.EventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import uz.finbank.finbankauthservice.config.AppSecurityProperties;
 import uz.finbank.finbankauthservice.entity.PasswordResetTokenEntity;
@@ -17,6 +17,7 @@ import uz.finbank.finbankauthservice.event.PasswordResetRequestedEvent;
 import uz.finbank.finbankauthservice.exception.InvalidResetTokenException;
 import uz.finbank.finbankauthservice.repository.PasswordResetTokenRepository;
 import uz.finbank.finbankauthservice.repository.UserRepository;
+import uz.finbank.finbankauthservice.security.RateLimiterService;
 import uz.finbank.finbankauthservice.security.SecureTokenGenerator;
 import uz.finbank.finbankauthservice.security.TokenHasher;
 import uz.finbank.finbankauthservice.service.SessionService;
@@ -49,7 +50,9 @@ class PasswordResetServiceImplTest {
     @Mock
     private TokenHasher tokenHasher;
     @Mock
-    private KafkaTemplate<String, Object> kafkaTemplate;
+    private EventPublisher eventPublisher;
+    @Mock
+    private RateLimiterService rateLimiterService;
 
     private AppSecurityProperties securityProperties;
     private PasswordResetServiceImpl service;
@@ -65,8 +68,9 @@ class PasswordResetServiceImplTest {
                 passwordEncoder,
                 secureTokenGenerator,
                 tokenHasher,
-                kafkaTemplate,
-                securityProperties);
+                eventPublisher,
+                securityProperties,
+                rateLimiterService);
     }
 
     private UserEntity userWithId(String id, String email) {
@@ -76,13 +80,24 @@ class PasswordResetServiceImplTest {
     }
 
     @Test
+    void requestReset_shouldThrowTooManyRequestsAndSkipUserLookup_when_rateLimiterDeniesTheEmailKey() {
+        org.mockito.Mockito.doThrow(new uz.finbank.finbankauthservice.exception.TooManyRequestsException("juda ko'p urinish"))
+                .when(rateLimiterService).enforce(eq("password-reset:email:user@test.local"), org.mockito.ArgumentMatchers.anyInt(), any());
+
+        assertThatThrownBy(() -> service.requestReset("user@test.local", "127.0.0.1"))
+                .isInstanceOf(uz.finbank.finbankauthservice.exception.TooManyRequestsException.class);
+
+        verify(userRepository, never()).findByEmail(any());
+    }
+
+    @Test
     void requestReset_shouldIssueTokenAndPublishEvent_whenUserExists() {
         UserEntity user = userWithId("user-1", "user@test.local");
         when(userRepository.findByEmail("user@test.local")).thenReturn(Optional.of(user));
         when(secureTokenGenerator.generate()).thenReturn("raw-token");
         when(tokenHasher.hash("raw-token")).thenReturn("hashed-token");
 
-        service.requestReset("user@test.local");
+        service.requestReset("user@test.local", "127.0.0.1");
 
         ArgumentCaptor<PasswordResetTokenEntity> tokenCaptor = ArgumentCaptor.forClass(PasswordResetTokenEntity.class);
         verify(passwordResetTokenRepository).save(tokenCaptor.capture());
@@ -95,7 +110,7 @@ class PasswordResetServiceImplTest {
                 .isBefore(LocalDateTime.now().plusMinutes(16));
 
         ArgumentCaptor<PasswordResetRequestedEvent> eventCaptor = ArgumentCaptor.forClass(PasswordResetRequestedEvent.class);
-        verify(kafkaTemplate).send(eq(PasswordResetRequestedEvent.TOPIC), eq("user-1"), eventCaptor.capture());
+        verify(eventPublisher).publish(eq(PasswordResetRequestedEvent.TOPIC), eq("user-1"), eventCaptor.capture());
         assertThat(eventCaptor.getValue().resetToken()).isEqualTo("raw-token");
         assertThat(eventCaptor.getValue().email()).isEqualTo("user@test.local");
     }
@@ -104,10 +119,10 @@ class PasswordResetServiceImplTest {
     void requestReset_shouldDoNothingSilently_whenUserDoesNotExist() {
         when(userRepository.findByEmail("missing@test.local")).thenReturn(Optional.empty());
 
-        service.requestReset("missing@test.local");
+        service.requestReset("missing@test.local", "127.0.0.1");
 
         verify(passwordResetTokenRepository, never()).save(any());
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+        verify(eventPublisher, never()).publish(anyString(), anyString(), any());
     }
 
     @Test
@@ -136,7 +151,7 @@ class PasswordResetServiceImplTest {
         verify(sessionService).revokeAllActiveSessions("user-1");
 
         ArgumentCaptor<PasswordChangedEvent> eventCaptor = ArgumentCaptor.forClass(PasswordChangedEvent.class);
-        verify(kafkaTemplate).send(eq(PasswordChangedEvent.TOPIC), eq("user-1"), eventCaptor.capture());
+        verify(eventPublisher).publish(eq(PasswordChangedEvent.TOPIC), eq("user-1"), eventCaptor.capture());
         assertThat(eventCaptor.getValue().userId()).isEqualTo("user-1");
     }
 

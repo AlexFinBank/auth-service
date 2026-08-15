@@ -15,6 +15,7 @@ public class AppSecurityProperties {
     private Login login = new Login();
     private PasswordReset passwordReset = new PasswordReset();
     private BootstrapAdmin bootstrapAdmin = new BootstrapAdmin();
+    private RateLimit rateLimit = new RateLimit();
 
     @Data
     public static class Jwt {
@@ -52,5 +53,17 @@ public class AppSecurityProperties {
         private String username;
         private String email;
         private String password;
+    }
+
+    /** IP-based limits guard against distributed attempts across many emails; email-based
+     * limits guard a single targeted account regardless of source IP. Both apply together. */
+    @Data
+    public static class RateLimit {
+        private int loginMaxPerEmail = 10;
+        private int loginMaxPerIp = 30;
+        private long loginWindowMinutes = 5;
+        private int passwordResetMaxPerEmail = 3;
+        private int passwordResetMaxPerIp = 10;
+        private long passwordResetWindowMinutes = 15;
     }
 }

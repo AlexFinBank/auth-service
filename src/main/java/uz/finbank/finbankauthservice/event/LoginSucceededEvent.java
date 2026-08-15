@@ -1,6 +1,7 @@
 package uz.finbank.finbankauthservice.event;
 
 import lombok.Builder;
+import uz.finbank.finbankauthservice.entity.enums.RoleEnum;
 
 import java.time.LocalDateTime;
 
@@ -8,6 +9,7 @@ import java.time.LocalDateTime;
 public record LoginSucceededEvent(
         String userId,
         String sessionId,
+        RoleEnum role,
         String ipAddress,
         String deviceLabel,
         LocalDateTime loggedInAt

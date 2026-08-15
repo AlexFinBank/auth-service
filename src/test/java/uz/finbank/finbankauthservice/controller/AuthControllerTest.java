@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -67,7 +68,7 @@ class AuthControllerTest {
                 .status(UserStatusEnum.ACTIVE)
                 .createdAt(LocalDateTime.now())
                 .build();
-        when(authService.register(any(RegisterRequest.class))).thenReturn(response);
+        when(authService.register(any(RegisterRequest.class), isNull())).thenReturn(response);
 
         mockMvc.perform(post("/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -77,6 +78,32 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.username").value("johndoe"))
                 .andExpect(jsonPath("$.email").value("john@example.com"))
                 .andExpect(jsonPath("$.role").value("CUSTOMER"));
+    }
+
+    @Test
+    void should_passIdempotencyKeyHeaderToService_when_registerRequestIncludesIt() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .username("johndoe")
+                .email("john@example.com")
+                .password("password123")
+                .build();
+        UserResponse response = UserResponse.builder()
+                .id("user-1")
+                .username("johndoe")
+                .email("john@example.com")
+                .role(RoleEnum.CUSTOMER)
+                .status(UserStatusEnum.ACTIVE)
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(authService.register(any(RegisterRequest.class), eq("client-key-1"))).thenReturn(response);
+
+        mockMvc.perform(post("/register")
+                        .header("Idempotency-Key", "client-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+
+        verify(authService).register(any(RegisterRequest.class), eq("client-key-1"));
     }
 
     @Test
